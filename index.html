@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>細胞指揮官：體細胞分裂 (完美對齊版)</title>
+    <style>
+        :root {
+            --bg-color: #1a1a1a;
+            --highlight: #ffce00;
+            --red-chr-fill: #ff7b7b;
+            --red-chr-stroke: #c0392b;
+            --blue-chr-fill: #5edadd;
+            --blue-chr-stroke: #2980b9;
+            --cell-border: #888;
+        }
+
+        body {
+            margin: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-color);
+            color: white;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            height: 100vh;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        #dashboard {
+            width: 100%;
+            padding: 15px;
+            background-color: #252525;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.5);
+            z-index: 100;
+        }
+
+        .status-box { text-align: left; }
+        h2 { margin: 0; font-size: 1.2rem; color: var(--highlight); }
+        p { margin: 5px 0 0; font-size: 0.9rem; color: #aaa; }
+
+        #action-btn {
+            background-color: var(--highlight);
+            color: #000;
+            border: none;
+            padding: 10px 25px;
+            border-radius: 25px;
+            font-size: 1rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        #action-btn:hover { transform: scale(1.05); box-shadow: 0 0 15px var(--highlight); }
+        #action-btn.disabled { opacity: 0.5; pointer-events: none; filter: grayscale(100%); box-shadow: none;}
+
+        #game-area {
+            position: relative;
+            width: 100%;
+            flex-grow: 1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: radial-gradient(circle at center, #333 0%, #121212 100%);
+        }
+
+        #cell {
+            width: 500px;
+            height: 500px;
+            border: 4px solid var(--cell-border);
+            border-radius: 50%;
+            position: relative;
+            background: radial-gradient(circle, #2a2a2a 0%, #151515 100%);
+            overflow: hidden;
+            transition: all 2.5s ease;
+            box-shadow: inset 0 0 50px rgba(0,0,0,0.5);
+        }
+
+        .cleavage-line {
+            position: absolute;
+            background-color: var(--bg-color);
+            z-index: 5;
+            transition: all 2.5s ease;
+            box-shadow: 0 0 10px rgba(0,0,0,0.8);
+        }
+
+        #cleavage-h { 
+            top: 50%; left: -10%; width: 120%; height: 0px;
+            border-top: 4px solid var(--cell-border);
+            border-bottom: 4px solid var(--cell-border);
+            opacity: 0;
+        }
+
+        .equator-line {
+            position: absolute;
+            border-top: 2px dashed rgba(255, 255, 255, 0.5);
+            width: 100%;
+            top: 50%; /* 250px */
+            display: none;
+            z-index: 0;
+            pointer-events: none;
+        }
+
+        /* 染色體容器 */
+        .chromosome {
+            position: absolute;
+            width: 30px; 
+            /* 容器高度會被子元素撐開，這裡主要依賴 flex 置中 */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 10;
+            pointer-events: none; 
+            /* 慢速移動：1.5秒 */
+            transition: transform 0.2s, left 1.5s ease-in-out, top 1.5s ease-in-out;
+            overflow: visible; 
+        }
+
+        .chromosome.draggable { cursor: grab; pointer-events: all; transition: transform 0.2s; }
+        .chromosome.draggable:active { cursor: grabbing; transform: scale(1.1); z-index: 100; }
+
+        .chromatid {
+            position: absolute;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            transition: all 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            filter: drop-shadow(1px 1px 2px rgba(0,0,0,0.5));
+        }
+        
+        .chromatid svg {
+            width: 22px;
+            height: 100%;
+            overflow: visible;
+        }
+
+        .long .chromatid { height: 100px; }
+        .short .chromatid { height: 60px; }
+
+        .red .chromatid-shape { fill: var(--red-chr-fill); stroke: var(--red-chr-stroke); }
+        .blue .chromatid-shape { fill: var(--blue-chr-fill); stroke: var(--blue-chr-stroke); }
+        .chromatid-texture { stroke: rgba(0,0,0,0.3); stroke-width: 0.5; }
+
+        .chromatid.single { transform: rotate(0deg); }
+        .chromatid.left-sister { transform: rotate(12deg) translateX(-2px); }
+        .chromatid.right-sister { transform: rotate(-12deg) translateX(2px); }
+        .chromatid.split { transform: rotate(0deg) !important; margin: 0; }
+
+        .centromere {
+            width: 10px;
+            height: 10px;
+            background: radial-gradient(circle at 30% 30%, #fff7bc, #ffd700);
+            border-radius: 50%;
+            position: relative;
+            z-index: 15;
+            box-shadow: 0 0 5px rgba(255, 215, 0, 0.8);
+            border: 1px solid #b8860b;
+        }
+
+        #message {
+            position: absolute;
+            bottom: 30px;
+            background: rgba(0,0,0,0.9);
+            padding: 15px 30px;
+            border-radius: 8px;
+            color: #fff;
+            font-size: 1.1rem;
+            display: none;
+            z-index: 200;
+            border-left: 5px solid var(--highlight);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.5);
+        }
+    </style>
+</head>
+<body>
+
+    <svg style="display: none;">
+        <defs>
+            <pattern id="hatchPattern" patternUnits="userSpaceOnUse" width="4" height="4" patternTransform="rotate(45)">
+                <line x1="0" y1="0" x2="0" y2="4" stroke="#000" stroke-width="0.8" opacity="0.2" />
+            </pattern>
+        </defs>
+    </svg>
+
+    <div id="dashboard">
+        <div class="status-box">
+            <h2 id="phase-title">階段 0: 間期 (Interphase)</h2>
+            <p id="instruction">準備進行體細胞分裂。請複製 DNA。</p>
+        </div>
+        <button id="action-btn">開始 DNA 複製</button>
+    </div>
+
+    <div id="game-area">
+        <div id="cell">
+            <div id="cleavage-h" class="cleavage-line"></div>
+            <div id="equator" class="equator-line"></div>
+            </div>
+    </div>
+    
+    <div id="message"></div>
+
+    <script>
+        const state = { phase: 0 };
+        const cell = document.getElementById('cell');
+        const actionBtn = document.getElementById('action-btn');
+        const instruction = document.getElementById('instruction');
+        const phaseTitle = document.getElementById('phase-title');
+        
+        const pathLong = "M 10,1 C 16,1 20,8 20,20 C 20,35 13,45 13,50 C 13,55 20,65 20,80 C 20,92 16,99 10,99 C 4,99 0,92 0,80 C 0,65 7,55 7,50 C 7,45 0,35 0,20 C 0,8 4,1 10,1 Z";
+        const pathShort = "M 10,1 C 16,1 20,5 20,15 C 20,25 13,27 13,30 C 13,33 20,35 20,45 C 20,55 16,59 10,59 C 4,59 0,55 0,45 C 0,35 7,33 7,30 C 7,27 0,25 0,15 C 0,5 4,1 10,1 Z";
+
+        // 調整初始 X 位置，確保完整顯示在畫面內
+        const chromosomesData = [
+            { id: 'r-long', type: 'long', color: 'red', x: 140, y: 80 },
+            { id: 'b-long', type: 'long', color: 'blue', x: 380, y: 100 },
+            { id: 'r-short', type: 'short', color: 'red', x: 120, y: 340 },
+            { id: 'b-short', type: 'short', color: 'blue', x: 350, y: 360 }
+        ];
+
+        function initGame() {
+            chromosomesData.forEach(data => createSingleChromosome(data));
+            actionBtn.addEventListener('click', handleBtnClick);
+        }
+
+        function handleBtnClick() {
+            switch(state.phase) {
+                case 0: performReplication(); break;
+                case 1: nextPhase(2); break;
+                case 2: nextPhase(3); break; 
+                case 3: resetGame(); break;
+            }
+        }
+
+        function createChromatidSVG(type) {
+            const svgNs = "http://www.w3.org/2000/svg";
+            const svg = document.createElementNS(svgNs, "svg");
+            const viewBoxStr = type === 'long' ? "0 0 20 100" : "0 0 20 60";
+            const pathStr = type === 'long' ? pathLong : pathShort;
+            svg.setAttribute("viewBox", viewBoxStr);
+
+            const shape = document.createElementNS(svgNs, "path");
+            shape.setAttribute("d", pathStr);
+            shape.classList.add("chromatid-shape");
+            shape.style.strokeWidth = "1.5";
+
+            const texture = document.createElementNS(svgNs, "path");
+            texture.setAttribute("d", pathStr);
+            texture.style.fill = "url(#hatchPattern)";
+            texture.classList.add("chromatid-texture");
+
+            svg.appendChild(shape);
+            svg.appendChild(texture);
+            return svg;
+        }
+
+        function createSingleChromosome(data) {
+            const container = document.createElement('div');
+            container.classList.add('chromosome', data.type, data.color);
+            container.id = data.id;
+            container.style.left = data.x + 'px';
+            container.style.top = data.y + 'px';
+            
+            const centromere = document.createElement('div');
+            centromere.classList.add('centromere');
+            
+            const singleChromatid = document.createElement('div');
+            singleChromatid.classList.add('chromatid', 'single');
+            singleChromatid.appendChild(createChromatidSVG(data.type));
+
+            container.appendChild(singleChromatid);
+            container.appendChild(centromere);
+            cell.appendChild(container);
+        }
+
+        function performReplication() {
+            actionBtn.classList.add('disabled');
+            showMessage("DNA 複製中... (染色體變成二分體)");
+
+            document.querySelectorAll('.chromosome').forEach((container, i) => {
+                const original = container.querySelector('.chromatid');
+                original.classList.remove('single');
+                original.classList.add('left-sister');
+
+                const sister = original.cloneNode(true);
+                sister.classList.remove('left-sister');
+                sister.classList.add('right-sister');
+                sister.style.opacity = 0;
+                
+                container.insertBefore(sister, container.querySelector('.centromere'));
+                
+                setTimeout(() => {
+                    sister.style.opacity = 1;
+                    container.classList.add('draggable');
+                    makeDraggable(container);
+                }, 200 + i*100);
+            });
+
+            setTimeout(() => {
+                state.phase = 1;
+                updateUI("階段 1: 排列 (Metaphase)", "請將所有染色體(共4條)排列在中央赤道板上。", "執行分裂");
+                document.getElementById('equator').style.display = 'block';
+                disableActionBtn(); 
+            }, 1500);
+        }
+
+        function makeDraggable(el) {
+            let isDragging = false;
+            let startX, startY, initialX, initialY;
+
+            el.addEventListener('mousedown', (e) => {
+                if (state.phase !== 1) return; 
+
+                isDragging = true;
+                el.style.zIndex = 100;
+                el.style.transition = 'none'; 
+                
+                startX = e.clientX;
+                startY = e.clientY;
+                initialX = parseFloat(el.style.left);
+                initialY = parseFloat(el.style.top);
+
+                const moveDrag = (e) => {
+                    if (!isDragging) return;
+                    el.style.left = `${initialX + (e.clientX - startX)}px`;
+                    el.style.top = `${initialY + (e.clientY - startY)}px`;
+                };
+
+                const stopDrag = () => {
+                    isDragging = false;
+                    el.style.zIndex = '';
+                    el.style.transition = 'transform 0.2s, left 1.5s ease-in-out, top 1.5s ease-in-out';
+                    document.removeEventListener('mousemove', moveDrag);
+                    document.removeEventListener('mouseup', stopDrag);
+                    checkAlignment(el);
+                };
+
+                document.addEventListener('mousemove', moveDrag);
+                document.addEventListener('mouseup', stopDrag);
+            });
+        }
+
+        function checkAlignment(el) {
+            const y = parseFloat(el.style.top);
+            // [關鍵修改]：統一吸附目標位置
+            // 赤道板在 250px。
+            // 染色體容器(.chromosome)的高度由著絲點(10px)決定。
+            // 染色體的手臂(.chromatid)是絕對定位，以中心向上下延伸。
+            // 所以，要讓「著絲點」對準線，只要讓容器的中心對準線即可。
+            // 250px - (著絲點一半高度 5px) = 245px。
+            const targetTop = 245; 
+
+            // 判斷是否在赤道板附近
+            if (Math.abs(y - targetTop) < 60) {
+                el.style.top = targetTop + 'px'; // 吸附
+                el.classList.add('aligned');
+            } else {
+                el.classList.remove('aligned');
+            }
+
+            const allChromosomes = document.querySelectorAll('.chromosome');
+            const allAligned = Array.from(allChromosomes).every(c => c.classList.contains('aligned'));
+
+            if (allAligned) {
+                enableActionBtn();
+                showMessage("排列整齊！著絲點已對準赤道板。");
+            } else {
+                disableActionBtn();
+            }
+        }
+
+        function nextPhase(p) {
+            state.phase = p;
+            
+            if (p === 2) { 
+                updateUI("階段 2: 分離 (Anaphase)", "姊妹染色分體分離！(垂直移動不交叉)", "完成分裂");
+                document.getElementById('equator').style.display = 'none';
+                disableActionBtn();
+                performAnaphase();
+            } 
+            else if (p === 3) { 
+                performCytokinesis();
+            }
+        }
+
+        function performAnaphase() {
+            const chromosomes = document.querySelectorAll('.chromosome');
+            
+            chromosomes.forEach((chr, index) => {
+                const rect = chr.getBoundingClientRect();
+                const cellRect = cell.getBoundingClientRect();
+                
+                // 獲取當前染色體確切的 X 座標，確保垂直分離不交叉
+                const currentLeft = rect.left - cellRect.left;
+                const currentTop = rect.top - cellRect.top;
+
+                const sister1 = chr.children[0];
+                const sister2 = chr.children[1];
+                const centromere = chr.querySelector('.centromere');
+                centromere.style.opacity = 0; 
+
+                // 直接使用 currentLeft，不加隨機數
+                createSplitChromatid(sister1, currentLeft, currentTop, 'up');
+                createSplitChromatid(sister2, currentLeft, currentTop, 'down');
+
+                chr.remove();
+            });
+
+            setTimeout(() => {
+                nextPhase(3); 
+            }, 4000);
+        }
+
+        function createSplitChromatid(sourceNode, x, y, dir) {
+            const container = document.createElement('div');
+            container.className = 'chromosome'; 
+            container.style.left = x + 'px';
+            container.style.top = y + 'px';
+            
+            const type = sourceNode.parentElement.classList.contains('long') ? 'long' : 'short';
+            const color = sourceNode.parentElement.classList.contains('red') ? 'red' : 'blue';
+            container.classList.add(type, color);
+
+            const stick = document.createElement('div');
+            stick.className = 'chromatid split';
+            stick.appendChild(createChromatidSVG(type));
+            
+            const cen = document.createElement('div');
+            cen.className = 'centromere';
+
+            container.appendChild(stick);
+            container.appendChild(cen);
+            cell.appendChild(container);
+
+            // 計算目標 Y 位置 (垂直移動)
+            const targetY = (dir === 'up') ? 100 : 350;
+
+            setTimeout(() => {
+                container.style.left = x + 'px'; // X 軸保持不變
+                container.style.top = targetY + 'px';
+            }, 50);
+        }
+
+        function performCytokinesis() {
+            showMessage("細胞質分裂：形成兩個完全相同的子細胞 (2N)");
+            const lineH = document.getElementById('cleavage-h');
+            lineH.style.opacity = 1;
+            lineH.style.height = '8px'; 
+            cell.style.borderRadius = '40px'; 
+            
+            phaseTitle.textContent = "任務完成";
+            instruction.textContent = "分裂完成！產生 2 個子細胞，染色體數目與母細胞相同。";
+            actionBtn.style.display = 'none';
+        }
+
+        function updateUI(title, instr, btnText) {
+            phaseTitle.textContent = title;
+            instruction.textContent = instr;
+            if (btnText) actionBtn.textContent = btnText;
+        }
+
+        function showMessage(text) {
+            const msg = document.getElementById('message');
+            msg.textContent = text;
+            msg.style.display = 'block';
+            setTimeout(() => msg.style.display = 'none', 3000);
+        }
+        
+        function enableActionBtn() { actionBtn.classList.remove('disabled'); }
+        function disableActionBtn() { actionBtn.classList.add('disabled'); }
+        function resetGame() { location.reload(); }
+
+        initGame();
+    </script>
+</body>
+</html>
